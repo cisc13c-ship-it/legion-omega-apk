@@ -45,3 +45,40 @@ Discovery, planning, manifest validation and sandbox tests may run automatically
 
 ## Non-goals for v0
 Rooting devices, bypassing Android prompts, hidden persistence, credential extraction, arbitrary remote shell exposed to an LLM, self-modifying production binaries or silent executable skill downloads.
+
+
+## Google account integration — OAuth connector
+
+Google account linking is an optional integration, not a prerequisite for the core app. It uses Google's official OAuth 2.0 authorization and APIs; LEGIÓN never asks for or stores the user's Google password.
+
+### Initial services
+- Google Drive: list/search metadata and read selected files first; upload/create/update only after a separate WRITE grant.
+- Gmail: begin with message search and metadata; read message bodies only with a separately explained scope; sending mail is a distinct EXECUTE-like capability requiring explicit confirmation.
+- Later candidates: Calendar and Contacts, each independently enabled and scoped.
+
+### Least-privilege model
+- Use incremental OAuth consent: request a scope only when the user enables the corresponding feature.
+- Prefer narrow Drive scopes such as app-created files or user-selected files where those fit; do not default to full Drive access.
+- Separate READ, WRITE, SEND and DELETE capabilities. Never bundle them into one broad "Google access" toggle.
+- Show the exact account, granted scopes, last sync, connected nodes and data-retention policy.
+- Support disconnect, token revocation and local deletion of cached data.
+- Store refresh tokens only in Android Keystore-backed encrypted storage or a dedicated self-hosted secret store; never in Git, logs, skill manifests or plain SQLite.
+- Keep tokens on the user's device or trusted self-hosted gateway. Do not forward raw OAuth tokens to language models or arbitrary nodes.
+- Audit every API operation with actor, scope, resource ID, action, result and timestamp; redact message contents and secrets from logs.
+
+### ChatGPT / MCP bridge
+An optional CISC-MCP Google connector can expose a small allowlisted tool surface (for example: search Drive files, read a user-selected file, search Gmail metadata). The bridge must authenticate independently, enforce the same policy engine and return only the minimum requested content.
+
+Linking Google to LEGIÓN does **not** automatically grant ChatGPT access. For ChatGPT to use the integration, the MCP service must be reachable through a supported connection method and separately connected/authorized by the user in ChatGPT. If that connection is unavailable, LEGIÓN can still use Google APIs locally and export a selected result for the user to share.
+
+### Google policy and F-Droid constraints
+Google OAuth scopes may be sensitive or restricted. Public distribution may require OAuth app verification, privacy disclosures, domain ownership and, for restricted-scope server-side access, an independent security assessment. Keep separate development and production OAuth projects. Confirm current scope classification before implementation.
+
+F-Droid compatibility must be evaluated for the chosen OAuth flow and dependencies. No proprietary Google Play Services SDK is required as an architectural assumption; prefer standards-based OAuth and HTTPS APIs where practical. Google APIs remain a third-party online service and the app must disclose that this optional feature contacts Google.
+
+### Safe rollout
+1. Local prototype with a test Google Cloud project and one test account.
+2. Drive metadata and selected-file READ only.
+3. Gmail metadata search, then selected message reading behind separate consent.
+4. Write/upload and email send only after independent review and confirmation UX.
+5. MCP bridge only after local OAuth, token storage and policy enforcement are tested.
