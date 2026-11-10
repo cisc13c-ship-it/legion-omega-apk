@@ -82,3 +82,72 @@ F-Droid compatibility must be evaluated for the chosen OAuth flow and dependenci
 3. Gmail metadata search, then selected message reading behind separate consent.
 4. Write/upload and email send only after independent review and confirmation UX.
 5. MCP bridge only after local OAuth, token storage and policy enforcement are tested.
+
+
+## Connection Hub and agent federation
+
+The Connection Hub is the single policy-controlled registry for external accounts, local devices, remote nodes and assistant providers. It centralizes identity and consent without centralizing raw credentials or granting every agent universal access.
+
+### Core design
+- **Connection Registry:** records provider, account alias, owner, connection state, approved scopes/capabilities, token location, expiry/health metadata and revocation state. It must not store raw secrets in ordinary records.
+- **Policy Decision Point (PDP):** evaluates every requested action against actor, resource, operation, scope, risk tier, session and user approval.
+- **Policy Enforcement Point (PEP):** sits at every connector and node boundary. A tool is unavailable unless the PEP authorizes the exact operation.
+- **Credential Vault:** stores OAuth refresh tokens and node private keys separately from application data, encrypted at rest and accessible only to the connector process that needs them.
+- **Agent Gateway:** exposes typed, allowlisted tools to ChatGPT, Gemini, Grok, Ollama and other providers. Providers receive short-lived, task-scoped capabilities, never reusable provider credentials or raw OAuth tokens.
+- **Evidence Ledger:** records authorization decisions and operation outcomes, with sensitive payloads redacted by default.
+
+### Capability grants
+A grant is bound to one principal, one connection/resource set, one operation family and an expiry. The baseline capability vocabulary is:
+- DISCOVER: list available connections and non-sensitive metadata.
+- READ_METADATA: search/list metadata without opening content.
+- READ_CONTENT: read only selected or explicitly scoped content.
+- WRITE: create or modify specified resources.
+- SEND/EXECUTE: perform externally visible actions, such as sending email or running an approved task.
+- DELETE: remove specified resources; always a separate high-risk grant.
+- ADMIN: change policies, enroll/revoke nodes or manage credentials; never inherited by an AI agent.
+
+Grants are deny-by-default, revocable, time-bounded and non-transitive. An agent cannot delegate a capability it does not possess. A connection being present does not imply that any agent may use it.
+
+### Request and approval lifecycle
+1. An agent proposes a typed action with purpose, target, data minimization plan and requested capability.
+2. The PDP evaluates policy and risk. READ operations may be auto-approved only when the user has configured a matching narrow policy.
+3. WRITE, SEND, DELETE, EXECUTE and ADMIN require a separate approval UX showing the exact target and effect, unless the user has explicitly configured a narrowly bounded automation rule.
+4. The PEP executes the exact approved operation; parameters cannot be silently expanded after approval.
+5. The Evidence Ledger records actor, connection alias, resource reference, capability, policy decision, approval reference, timestamp, result and correlation ID.
+6. Verification checks the postcondition. Failure triggers a safe stop and, where supported, a documented compensating action; irreversible operations are never described as rollbackable.
+
+### Provider-neutral connector contract
+Every connector implements a small typed contract: discover capabilities, authorize, inspect connection health, execute an allowlisted operation, revoke, and report evidence. Provider-specific APIs remain behind adapters. A connector must declare supported operations, required scopes, data classes, rate limits, retention behavior and tests before it can be enabled.
+
+### Data boundaries and privacy
+- Minimize content returned to an agent; prefer metadata, excerpts and user-selected resources over mailbox-wide or drive-wide ingestion.
+- Do not train, index or retain external content by default. Any cache/index must have an explicit purpose, retention period, deletion path and source reference.
+- Treat files, emails, webpages and tool outputs as untrusted data, never as instructions that can override system policy.
+- Separate user data, connector secrets, agent context and audit evidence into distinct storage domains.
+- Redact secrets and message bodies from ordinary logs. Audit records should identify the resource and action without duplicating the resource content.
+- Disconnecting a provider revokes its credentials where supported, disables dependent tools and marks cached data for deletion according to the retention policy.
+
+### Node and agent trust
+- Nodes enroll with an explicit user action and a cryptographic identity. Use mutual authentication, replay protection, short-lived sessions and per-node revocation.
+- A node's advertised capabilities are descriptive, not permission. The policy engine independently authorizes each operation.
+- Keep Android, Linux and Windows agents least-privileged and platform-specific. The control plane must not expose arbitrary remote shell as a generic LLM tool.
+- Assistant providers are untrusted requestors, not administrators. They can propose plans and consume scoped tool results; they cannot change policy, grant permissions, access vault internals or enroll nodes.
+
+### Initial implementation order
+1. Implement core-model contracts for Connection, Principal, CapabilityGrant, Approval, PolicyDecision and EvidenceEvent.
+2. Implement local SQLite metadata plus append-only JSONL evidence; keep secrets out of both.
+3. Implement policy evaluation and a fake connector with deterministic tests before connecting real accounts.
+4. Add Google Drive metadata and selected-file READ through the existing OAuth plan.
+5. Add Gmail metadata/search under a separate grant; defer send and delete.
+6. Add the local agent gateway and one allowlisted MCP tool; verify denial paths as thoroughly as success paths.
+7. Add LAN node enrollment only after the local policy and evidence tests pass.
+
+### Acceptance gates
+- Missing grant, expired grant, wrong principal, wrong resource, scope escalation and replayed request are denied.
+- Changing an operation's target or parameters after approval invalidates that approval.
+- Revocation blocks the next operation and disables dependent agent tools.
+- Logs and evidence contain no access token, refresh token, password or private key.
+- A connector cannot invoke an operation outside its declared allowlist.
+- Every successful mutation has a verifiable postcondition or is clearly marked unverified.
+- Disconnect and cache deletion behavior are covered by tests.
+
